@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Fleet User Fetcher",
+  "version": "1.0",
+  "description": "Fetches a list of users for a specific park_id.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "cookies",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://fleet.yango.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://fleet.yango.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["*://fleet.yango.com/*"]
+    }
+  ]
+}

@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Fleet Contractor Exporter</title>
+  <!-- Load Inter font for modern, premium typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #f8f9fa;
+      --card-bg: #ffffff;
+      --text-main: #212529;
+      --text-muted: #6c757d;
+      --border-color: #e9ecef;
+      --border-hover: #ced4da;
+      --primary: #343a40;
+      --primary-hover: #212529;
+      --success: #2b8a3e;
+      --warning: #e67700;
+      --danger: #c92a2a;
+      --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.04);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05);
+      --radius: 8px;
+      --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    body {
+      width: 360px;
+      margin: 0;
+      padding: 16px;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      box-sizing: border-box;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Scrollbars styling */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-hover);
+      border-radius: 3px;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Header styling */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 12px;
+    }
+
+    .logo-section h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--primary);
+    }
+
+    .logo-section p {
+      margin: 2px 0 0 0;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Cards */
+    .card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: var(--transition);
+    }
+
+    .card:hover {
+      box-shadow: var(--shadow-md);
+      border-color: var(--border-hover);
+    }
+
+    .card-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin: 0 0 4px 0;
+    }
+
+    /* Status Indicators */
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .status-label {
+      color: var(--text-main);
+      font-weight: 500;
+    }
+
+    .badge {
+      padding: 4px 8px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .badge-error {
+      background-color: #fff5f5;
+      color: var(--danger);
+    }
+    .badge-error .badge-dot { background-color: var(--danger); }
+
+    .badge-success {
+      background-color: #ebfbee;
+      color: var(--success);
+    }
+    .badge-success .badge-dot { background-color: var(--success); }
+
+    .badge-warning {
+      background-color: #fff9db;
+      color: var(--warning);
+    }
+    .badge-warning .badge-dot {
+      background-color: var(--warning);
+      animation: pulse 1.5s infinite ease-in-out;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 0.4; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.1); }
+      100% { opacity: 0.4; transform: scale(0.9); }
+    }
+
+    /* Inputs */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    input[type="date"] {
+      padding: 8px 10px;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--text-main);
+      background-color: var(--bg-color);
+      outline: none;
+      transition: var(--transition);
+    }
+
+    input[type="date"]:focus {
+      border-color: var(--primary);
+      background-color: var(--card-bg);
+      box-shadow: 0 0 0 2px rgba(52, 58, 64, 0.1);
+    }
+
+    /* Buttons */
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    button {
+      padding: 10px 14px;
+      border: 1px solid var(--primary);
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: var(--transition);
+    }
+
+    .btn-primary {
+      background-color: var(--primary);
+      color: #ffffff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background-color: var(--primary-hover);
+      border-color: var(--primary-hover);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background-color: #ffffff;
+      color: var(--primary);
+      border-color: var(--border-color);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background-color: var(--bg-color);
+      border-color: var(--border-hover);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      border-color: var(--border-color);
+      background-color: var(--border-color);
+      color: var(--text-muted);
+    }
+
+    /* Output Console Log */
+    .console {
+      background-color: #212529;
+      color: #f8f9fa;
+      border-radius: 6px;
+      padding: 10px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      max-height: 100px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .info-box {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      background-color: var(--bg-color);
+      border-left: 2px solid var(--text-muted);
+      padding: 8px;
+      margin: 0;
+      border-radius: 0 4px 4px 0;
+    }
+
+    .info-box.info-warning {
+      border-left-color: var(--warning);
+      background-color: #fffef5;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo-section">
+        <h1>Yango Fleet Exporter</h1>
+        <p>Driver Profile &amp; Metrics Scraper</p>
+      </div>
+    </header>
+
+    <!-- Status Card -->
+    <div class="card">
+      <div class="card-title">System Status</div>
+      
+      <div class="status-row">
+        <span class="status-label">Authentication:</span>
+        <span id="authStatus" class="badge badge-error">
+          <span class="badge-dot"></span><span id="authStatusText">Disconnected</span>
+        </span>
+      </div>
+
+      <div class="status-row">
+        <span class="status-label">API Config:</span>
+        <span id="apiStatus" class="badge badge-success">
+          <span class="badge-dot"></span><span id="apiStatusText">Auto-Detect Ready</span>
+        </span>
+      </div>
+      
+      <div id="apiInfoBox" class="info-box">
+        API endpoint will be detected automatically on run. No manual page loads required.
+      </div>
+    </div>
+
+    <!-- Configuration Card -->
+    <div class="card">
+      <div class="card-title">Scraping Window</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="startDate">Start Date</label>
+          <input type="date" id="startDate">
+        </div>
+        <div class="form-group">
+          <label for="endDate">End Date</label>
+          <input type="date" id="endDate">
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions Card -->
+    <div class="card">
+  <div class="card-title">Actions</div>
+  <div class="btn-group">
+    <button id="scrapeExportBtn" class="btn-primary" disabled>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+      Fetch &amp; Export All to Excel
+    </button>
+
+    <button id="clearDataBtn" class="btn-secondary">Clear Data</button>
+  </div>
+</div>
+
+    <!-- Terminal Output -->
+    <div class="card">
+      <div class="card-title">Activity Log</div>
+      <div id="consoleLog" class="console">Ready...</div>
+    </div>
+  </div>
+
+  <!-- Load SheetJS for local Excel creation -->
+  <script src="xlsx.full.min.js"></script>
+  <!-- Load main logic -->
+  <script src="popup.js"></script>
+</body>
+</html>
