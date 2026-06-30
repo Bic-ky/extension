@@ -9,9 +9,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } catch (err) {
       sendResponse({ success: false, error: err.message });
     }
+  } else if (message.action === 'scrape_subvention') {
+    // 🌟 ADDED: Listener for the subvention (bonuses) scrape
+    try {
+      const result = performSubventionScrape();
+      sendResponse(result);
+    } catch (err) {
+      sendResponse({ success: false, error: err.message });
+    }
   }
   return true;
 });
+
+
+// --- SUBVENTION (BONUS) SCRAPER ---
+function performSubventionScrape() {
+  const pageText = document.body.innerText;
+  let activeGoalText = '0 of 0 trip';
+
+  // 1. Look directly for the "Today" card in the DOM elements
+  const allElements = Array.from(document.querySelectorAll('span, div, p, h1, h2, h3, h4, h5, h6'));
+  const todayNode = allElements.find(el => el.textContent.trim() === 'Today' && el.children.length === 0);
+
+  if (todayNode) {
+    // Traverse up the HTML tree to the card container, then extract the trip fraction
+    let parent = todayNode.parentElement;
+    for (let i = 0; i < 6; i++) { // Climb up to wrap the whole card
+      if (!parent) break;
+      // Looks for digits formatted exactly like your layout (e.g., "7 of 7 trip")
+      const match = parent.textContent.match(/(\d+\s*of\s*\d+\s*trips?)/i);
+      if (match) {
+        activeGoalText = match[1].trim();
+        break;
+      }
+      parent = parent.parentElement;
+    }
+  }
+
+  // 2. Global Regex Fallback just in case the "Today" label changes
+  if (activeGoalText === '0 of 0 trip') {
+    const fallbackMatch = pageText.match(/(\d+\s*of\s*\d+\s*trips?)/i);
+    if (fallbackMatch) {
+      activeGoalText = fallbackMatch[1].trim();
+    }
+  }
+
+  return {
+    success: true,
+    isReady: pageText.includes('Active goals') || pageText.includes('Today') || pageText.includes('trip'),
+    activeGoals: activeGoalText
+  };
+}
 
 function performTextStreamScrape() {
   const pageText = document.body.innerText;

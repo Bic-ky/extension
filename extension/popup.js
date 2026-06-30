@@ -130,7 +130,7 @@ async function handleApiIntercept(message) {
     const parsedUrl = new URL(url);
     const path = parsedUrl.pathname;
     
-    if (!path.includes('/rent/') && !path.includes('/metrics') && !path.includes('/details') && !path.includes('/earnings')) {
+    if (!path.includes('/rent/') && !path.includes('/metrics') && !path.includes('/details') && !path.includes('/earnings') && !path.includes('/subvention')) {
       return;
     }
 
@@ -375,7 +375,7 @@ async function runFullExport() {
     }
 
     // TESTING LIMIT: Caps test runs to 10 drivers
-    contractors = contractors.slice(0, 8);
+    contractors = contractors.slice(0, 8 );
     logConsole(`Total drivers to process: ${contractors.length}`);
     
     // --- MODE 2: Ultra-Fast Direct API Scraper ---
@@ -403,7 +403,6 @@ async function runFullExport() {
         await new Promise(r => setTimeout(r, 200));
       }
     } 
-    // --- MODE 1: Automated Tab-Navigation DOM Scraper ---
     // --- MODE 1: Automated Tab-Navigation DOM Scraper ---
     else {
       logConsole("Running in AUTOMATION MODE (Tab Navigation and DOM scraping)...");
@@ -469,10 +468,32 @@ async function runFullExport() {
             }
           } catch (e) {}
         }
+
+        // ================= STEP 2: SCRAPE ACTIVE GOALS =================
+        logConsole(`[${i+1}/${contractors.length}] Step 2: Loading Subventions for ${driver.full_name}...`);
+        const subventionUrl = `https://fleet.yango.com/contractors/${driver.id}/subvention?park_id=${parkId}`;
+        
+        await chrome.tabs.update(activeTab.id, { url: subventionUrl });
+        await new Promise(r => setTimeout(r, 2000));
+        
+        let subventionData = null;
+        for (let attempt = 1; attempt <= 12; attempt++) {
+          await new Promise(r => setTimeout(r, 400));
+          try {
+            const ping = await new Promise(r => chrome.tabs.sendMessage(activeTab.id, { action: 'ping' }, res => r(chrome.runtime.lastError ? null : res)));
+            if (!ping) {
+              await chrome.scripting.executeScript({ target: { tabId: activeTab.id }, files: ['content.js'] });
+              await new Promise(r => setTimeout(r, 200));
+            }
+            const scrape = await new Promise(r => chrome.tabs.sendMessage(activeTab.id, { action: 'scrape_subvention' }, res => r(chrome.runtime.lastError ? null : res)));
+            if (scrape && scrape.success && scrape.isReady) { subventionData = scrape; break; }
+          } catch (e) {}
+        }
         
         if (scrapedData && scrapedData.metrics) {
           const m = scrapedData.metrics;
           const displayName = scrapedData.riderName !== 'Unknown Driver' ? scrapedData.riderName : driver.full_name;
+          const activeGoalsValue = subventionData ? subventionData.activeGoals : '0 of 0';
           
           allRows.push({
             Trip_Date: startDate,
@@ -485,9 +506,10 @@ async function runFullExport() {
             Partner_Fees: m.partner_fees,
             Total_Collection: m.total_collection,
             Online_Hours: m.working_hours,
-            Average_Hourly_Earnings: m.hourly_earnings
+            Average_Hourly_Earnings: m.hourly_earnings,
+            Active_Goals: activeGoalsValue 
           });
-          logConsole(`Successfully scraped metrics for ${displayName}.`);
+          logConsole(`Successfully consolidated profiles for ${displayName} (${activeGoalsValue}).`);
         } else {
           logConsole(`Warning: Failed to scrape DOM for ${driver.full_name} (timeout).`);
         }
@@ -594,7 +616,8 @@ function generateExcel(rowsData, start, end) {
     'Partner Fees',
     'Total_Collection',
     'Online_Hours',
-    'Average Hourly Earnings'
+    'Average Hourly Earnings',
+    'Active goals'
   ];
   
   const wsData = [
@@ -614,7 +637,8 @@ function generateExcel(rowsData, start, end) {
       row.Partner_Fees,
       row.Total_Collection,
       row.Online_Hours,
-      row.Average_Hourly_Earnings
+      row.Average_Hourly_Earnings,
+      row.Active_Goals
     ]);
   });
   
