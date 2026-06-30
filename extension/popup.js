@@ -26,7 +26,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Wire up event listeners
   scrapeExportBtn.addEventListener('click', runFullExport);
-  scrapeActiveBtn.addEventListener('click', runActiveTabScrape);
   clearDataBtn.addEventListener('click', clearSavedEndpoint);
   
   // Listen for message from content script containing intercepted API data
@@ -375,7 +374,7 @@ async function runFullExport() {
     }
 
     // TESTING LIMIT: Caps test runs to 10 drivers
-    contractors = contractors.slice(0, 8 );
+    // contractors = contractors.slice(0, 8 );
     logConsole(`Total drivers to process: ${contractors.length}`);
     
     // --- MODE 2: Ultra-Fast Direct API Scraper ---
