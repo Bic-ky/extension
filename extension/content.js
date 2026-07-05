@@ -12,7 +12,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.action === 'scrape_subvention') {
     // 🌟 ADDED: Listener for the subvention (bonuses) scrape
     try {
-      const result = performSubventionScrape();
+      const result = performSubventionScrape(message.targetDate);
       sendResponse(result);
     } catch (err) {
       sendResponse({ success: false, error: err.message });
@@ -23,43 +23,89 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 
 // --- SUBVENTION (BONUS) SCRAPER ---
-function performSubventionScrape() {
+function performSubventionScrape(targetDate) {
   const pageText = document.body.innerText;
   let activeGoalText = '0 of 0 trip';
+  let bonusAmountText = 0; 
 
-  // 1. Look directly for the "Today" card in the DOM elements
-  const allElements = Array.from(document.querySelectorAll('span, div, p, h1, h2, h3, h4, h5, h6'));
-  const todayNode = allElements.find(el => el.textContent.trim() === 'Today' && el.children.length === 0);
+  if (!targetDate) {
+    const today = new Date();
+    targetDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  }
 
-  if (todayNode) {
-    // Traverse up the HTML tree to the card container, then extract the trip fraction
-    let parent = todayNode.parentElement;
-    for (let i = 0; i < 6; i++) { // Climb up to wrap the whole card
-      if (!parent) break;
-      // Looks for digits formatted exactly like your layout (e.g., "7 of 7 trip")
-      const match = parent.textContent.match(/(\d+\s*of\s*\d+\s*trips?)/i);
-      if (match) {
-        activeGoalText = match[1].trim();
-        break;
-      }
-      parent = parent.parentElement;
+  // Build possible date labels
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const dateParts = targetDate.split('-');
+  const possibleLabels = [];
+
+  if (dateParts.length === 3) {
+    const year = parseInt(dateParts[0], 10);
+    const monthIndex = parseInt(dateParts[1], 10) - 1;
+    const dayValue = parseInt(dateParts[2], 10);
+    
+    possibleLabels.push(`${months[monthIndex]} ${dayValue}`); 
+    possibleLabels.push(`${months[monthIndex].substring(0,3)} ${dayValue}`);
+    
+    const targetDateObj = new Date(year, monthIndex, dayValue);
+    const todayObj = new Date();
+    const yesterdayObj = new Date();
+    yesterdayObj.setDate(yesterdayObj.getDate() - 1);
+    
+    if (targetDateObj.toDateString() === todayObj.toDateString()) {
+      possibleLabels.push("Today");
+    }
+    if (targetDateObj.toDateString() === yesterdayObj.toDateString()) {
+      possibleLabels.push("Yesterday");
     }
   }
 
-  // 2. Global Regex Fallback just in case the "Today" label changes
-  if (activeGoalText === '0 of 0 trip') {
-    const fallbackMatch = pageText.match(/(\d+\s*of\s*\d+\s*trips?)/i);
-    if (fallbackMatch) {
-      activeGoalText = fallbackMatch[1].trim();
+  const tripRegex = /(\d+\s*(?:of|out of|\/)\s*\d+\s*trips?)/i;
+  let foundDateLabel = false;
+
+  for (let label of possibleLabels) {
+    const datePosition = pageText.toLowerCase().indexOf(label.toLowerCase());
+    if (datePosition !== -1) {
+      foundDateLabel = true;
+      
+      const contextBlock = pageText.substring(datePosition, datePosition + 400);
+      const tripMatch = contextBlock.match(tripRegex);
+      
+      if (tripMatch) {
+        activeGoalText = tripMatch[1].trim();
+        
+        // 🌟 FIX: Isolate ONLY the immediate text following the trip goal
+        const startIndex = tripMatch.index + tripMatch[0].length;
+        const immediateText = contextBlock.substring(startIndex, startIndex + 80);
+        
+        // 🌟 FIX: Find the VERY FIRST bonus indicator (either a % or an Rs amount)
+        const firstBonusMatch = immediateText.match(/(?:\+?\s*\d+\s*%)|(?:Rs\s*\d+(?:\.\d+)?)/i);
+        
+        if (firstBonusMatch) {
+          // If the very first thing it sees is a percentage, it's a percentage bonus -> force 0
+          if (firstBonusMatch[0].includes('%')) {
+            bonusAmountText = 0;
+          } else {
+            // Otherwise, it's an Rs amount, extract the numbers cleanly
+            const rsMatch = firstBonusMatch[0].match(/Rs\s*(\d+(?:\.\d+)?)/i);
+            if (rsMatch) {
+              bonusAmountText = parseFloat(rsMatch[1]);
+            }
+          }
+        }
+      }
+      break; 
     }
   }
 
   return {
     success: true,
-    isReady: pageText.includes('Active goals') || pageText.includes('Today') || pageText.includes('trip'),
-    activeGoals: activeGoalText
+    isReady: foundDateLabel || /Ended last week|Ended this week|% of trip total/i.test(pageText),
+    activeGoals: activeGoalText,
+    bonusAmount: bonusAmountText
   };
 }
+
+
 
 function performTextStreamScrape() {
   const pageText = document.body.innerText;

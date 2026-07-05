@@ -2,6 +2,7 @@
 // Main control panel logic for Yango Fleet Contractor Exporter
 
 // UI Elements
+const closeBtn = document.getElementById('closeBtn');
 const authStatus = document.getElementById('authStatus');
 const authStatusText = document.getElementById('authStatusText');
 const apiStatus = document.getElementById('apiStatus');
@@ -14,9 +15,12 @@ const scrapeActiveBtn = document.getElementById('scrapeActiveBtn');
 const clearDataBtn = document.getElementById('clearDataBtn');
 const consoleLog = document.getElementById('consoleLog');
 
+const stopExportBtn = document.getElementById('stopExportBtn');
+
 // Configuration State
 let parkId = null;
 let detectedEndpoint = null;
+let stopRequested = false;
 
 // Initialize Popup
 document.addEventListener('DOMContentLoaded', async () => {
@@ -27,6 +31,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Wire up event listeners
   scrapeExportBtn.addEventListener('click', runFullExport);
   clearDataBtn.addEventListener('click', clearSavedEndpoint);
+  scrapeExportBtn.addEventListener('click', runFullExport);
+
+  closeBtn.addEventListener('click', () => {
+    window.close();
+  });
   
   // Listen for message from content script containing intercepted API data
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -34,7 +43,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       handleApiIntercept(message);
     }
   });
+
+  stopExportBtn.addEventListener('click', () => {
+    stopRequested = true;
+    stopExportBtn.textContent = "Stopping...";
+    stopExportBtn.disabled = true;
+  });
+
+
 });
+
+function parseActiveGoals(goalString) {
+  let achieved = 0;
+  let target = 0;
+  if (goalString && typeof goalString === 'string') {
+    // Looks for patterns like "7 of 10", "7 out of 10", or "7/10"
+    const match = goalString.match(/(\d+)\s*(?:of|out of|\/)\s*(\d+)/i);
+    if (match) {
+      achieved = parseInt(match[1], 10);
+      target = parseInt(match[2], 10);
+    }
+  }
+  return { achieved, target };
+}
 
 // Helper: Log message to the console-like UI area
 function logConsole(message) {
@@ -62,6 +93,27 @@ function initializeDates() {
   endDateInput.value = formattedToday;
 }
 
+
+// 🌟 NEW HELPER: Converts "HH:MM:SS" to decimal hours (e.g., "01:38:56" -> 1.65)
+function formatWorkingHours(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return 0;
+  const parts = timeStr.split(':');
+  if (parts.length === 3) {
+    const h = parseInt(parts[0], 10) || 0;
+    const m = parseInt(parts[1], 10) || 0;
+    const s = parseInt(parts[2], 10) || 0;
+    const decimalHours = h + (m / 60) + (s / 3600);
+    return parseFloat(decimalHours.toFixed(2));
+  }
+  return parseFloat(timeStr) || 0;
+}
+
+// 🌟 NEW HELPER: Strips "/hour" and returns just the number (e.g., "329.32/hour" -> 329.32)
+function formatHourlyEarnings(earningsStr) {
+  if (!earningsStr) return 0;
+  const str = String(earningsStr).replace(/\/hour/i, '').replace(/,/g, '').trim();
+  return parseFloat(str) || 0;
+}
 // Update UI badge statuses
 function updateStatus(element, textElement, type, text) {
   element.className = `badge badge-${type}`;
@@ -240,8 +292,10 @@ function mapMetricsToRow(dayData, riderName, defaultDate = "") {
     Bonus: bonus,
     Partner_Fees: partnerFees,
     Total_Collection: parseFloat(totalCollection.toFixed(2)),
-    Online_Hours: onlineHoursStr,
-    Average_Hourly_Earnings: averageEarningsStr
+    Online_Hours: formatWorkingHours(workingHours),
+    Average_Hourly_Earnings: formatHourlyEarnings(avgHourly),
+    Achieved_Goal: 0, 
+    Target_Goal: 0
   };
 }
 
@@ -364,7 +418,13 @@ async function runFullExport() {
   const startDate = startDateInput.value;
   const endDate = endDateInput.value;
   
-  scrapeExportBtn.disabled = true;
+  // 🌟 FIX: Toggle UI buttons and reset the kill switch
+  scrapeExportBtn.style.display = 'none';
+  stopExportBtn.style.display = 'inline-block';
+  stopExportBtn.textContent = "Stop & Export";
+  stopExportBtn.disabled = false;
+  stopRequested = false; 
+  
   const allRows = [];
   
   try {
@@ -373,8 +433,6 @@ async function runFullExport() {
       throw new Error("No drivers found in this park.");
     }
 
-    // TESTING LIMIT: Caps test runs to 10 drivers
-    // contractors = contractors.slice(0, 8 );
     logConsole(`Total drivers to process: ${contractors.length}`);
     
     // --- MODE 2: Ultra-Fast Direct API Scraper ---
@@ -382,6 +440,12 @@ async function runFullExport() {
       logConsole("Running in SPEED MODE (Direct API fetches in the background)...");
       
       for (let i = 0; i < contractors.length; i++) {
+        // 🌟 KILL SWITCH CHECK
+        if (stopRequested) {
+          logConsole(`⚠️ Stop requested by user. Halting at ${i}/${contractors.length}...`);
+          break; // Exits the loop immediately
+        }
+
         const driver = contractors[i];
         logConsole(`[${i+1}/${contractors.length}] Requesting API metrics for ${driver.full_name}...`);
         
@@ -417,6 +481,12 @@ async function runFullExport() {
       const originalUrl = activeTab.url;
       
       for (let i = 0; i < contractors.length; i++) {
+        // 🌟 KILL SWITCH CHECK
+        if (stopRequested) {
+          logConsole(`⚠️ Stop requested by user. Halting at ${i}/${contractors.length}...`);
+          break; // Exits the loop immediately
+        }
+
         const driver = contractors[i];
         logConsole(`[${i+1}/${contractors.length}] Navigating to earnings for ${driver.full_name}...`);
         
@@ -425,12 +495,10 @@ async function runFullExport() {
         const contractorUrl = `https://fleet.yango.com/contractors/${driver.id}/income?park_id=${parkId}&rent_type=park&metrics_period_start=${metricsStart}&metrics_period_end=${metricsEnd}`;
         
         await chrome.tabs.update(activeTab.id, { url: contractorUrl });
-        
-        // Wait for tab navigation loading to settle initially
         await new Promise(r => setTimeout(r, 2000));
         
         let scrapedData = null;
-        const maxAttempts = 12; // 6-second max loading window per driver profile
+        const maxAttempts = 12; 
         
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           await new Promise(r => setTimeout(r, 500));
@@ -458,7 +526,6 @@ async function runFullExport() {
               });
             });
             
-            // Capture flat data directly from messaging context safely
             if (scrapeResponse && scrapeResponse.success && scrapeResponse.isReady) {
               scrapedData = scrapeResponse;
               break; 
@@ -468,7 +535,7 @@ async function runFullExport() {
           } catch (e) {}
         }
 
-        // ================= STEP 2: SCRAPE ACTIVE GOALS =================
+        // SCRAPE ACTIVE GOALS
         logConsole(`[${i+1}/${contractors.length}] Step 2: Loading Subventions for ${driver.full_name}...`);
         const subventionUrl = `https://fleet.yango.com/contractors/${driver.id}/subvention?park_id=${parkId}`;
         
@@ -484,15 +551,32 @@ async function runFullExport() {
               await chrome.scripting.executeScript({ target: { tabId: activeTab.id }, files: ['content.js'] });
               await new Promise(r => setTimeout(r, 200));
             }
-            const scrape = await new Promise(r => chrome.tabs.sendMessage(activeTab.id, { action: 'scrape_subvention' }, res => r(chrome.runtime.lastError ? null : res)));
+            
+            const scrape = await new Promise(r => chrome.tabs.sendMessage(activeTab.id, { 
+              action: 'scrape_subvention', 
+              targetDate: startDate 
+            }, res => r(chrome.runtime.lastError ? null : res)));
+            
             if (scrape && scrape.success && scrape.isReady) { subventionData = scrape; break; }
           } catch (e) {}
         }
         
         if (scrapedData && scrapedData.metrics) {
           const m = scrapedData.metrics;
-          const displayName = scrapedData.riderName !== 'Unknown Driver' ? scrapedData.riderName : driver.full_name;
+          
+          let displayName = scrapedData.riderName !== 'Unknown Driver' ? scrapedData.riderName : driver.full_name;
+          displayName = displayName.replace(/^Contractors\s*/i, '').trim();
+          
           const activeGoalsValue = subventionData ? subventionData.activeGoals : '0 of 0';
+          const subventionBonusValue = subventionData && subventionData.bonusAmount ? subventionData.bonusAmount : 0;
+          
+          let achievedGoal = 0;
+          let targetGoal = 0;
+          const goalMatch = activeGoalsValue.match(/(\d+)\s*(?:of|out of|\/)\s*(\d+)/i);
+          if (goalMatch) {
+            achievedGoal = parseInt(goalMatch[1], 10);
+            targetGoal = parseInt(goalMatch[2], 10);
+          }
           
           allRows.push({
             Trip_Date: startDate,
@@ -504,12 +588,18 @@ async function runFullExport() {
             Bonus: m.bonus,
             Partner_Fees: m.partner_fees,
             Total_Collection: m.total_collection,
-            Online_Hours: m.working_hours,
-            Average_Hourly_Earnings: m.hourly_earnings,
-            Active_Goals: activeGoalsValue 
+            
+            // 🌟 FIX: Apply formatters to clean the hours and earnings
+            Online_Hours: formatWorkingHours(m.working_hours), 
+            Average_Hourly_Earnings: formatHourlyEarnings(m.hourly_earnings), 
+            
+            Achieved_Goal: achievedGoal, 
+            Target_Goal: targetGoal,     
+            Subvention_Bonus: subventionBonusValue
           });
-          logConsole(`Successfully consolidated profiles for ${displayName} (${activeGoalsValue}).`);
-        } else {
+          logConsole(`Consolidated profile for ${displayName} (${achievedGoal}/${targetGoal} goals | Rs ${subventionBonusValue}).`);
+        }
+        else {
           logConsole(`Warning: Failed to scrape DOM for ${driver.full_name} (timeout).`);
         }
         
@@ -520,6 +610,7 @@ async function runFullExport() {
       await chrome.tabs.update(activeTab.id, { url: originalUrl });
     }
     
+    // Because we used 'break', allRows still contains everything successfully scraped up to the stop point!
     if (allRows.length > 0) {
       logConsole("Data collection complete. Compiling Excel sheet...");
       generateExcel(allRows, startDate, endDate);
@@ -529,7 +620,9 @@ async function runFullExport() {
   } catch (error) {
     logConsole(`Export process failed: ${error.message}`);
   } finally {
-    scrapeExportBtn.disabled = false;
+    // 🌟 FIX: Reset UI elements back to default start state
+    scrapeExportBtn.style.display = 'inline-block';
+    stopExportBtn.style.display = 'none';
   }
 }
 
@@ -616,7 +709,9 @@ function generateExcel(rowsData, start, end) {
     'Total_Collection',
     'Online_Hours',
     'Average Hourly Earnings',
-    'Active goals'
+    'Achieved Goal',
+    'Target Goal',
+    'Subvention Bonus'
   ];
   
   const wsData = [
@@ -637,7 +732,9 @@ function generateExcel(rowsData, start, end) {
       row.Total_Collection,
       row.Online_Hours,
       row.Average_Hourly_Earnings,
-      row.Active_Goals
+      row.Achieved_Goal, // 🌟 References the split achieved value
+      row.Target_Goal,   // 🌟 References the split target value
+      row.Subvention_Bonus
     ]);
   });
   
