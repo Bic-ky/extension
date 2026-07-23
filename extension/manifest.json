@@ -20,7 +20,8 @@
     "service_worker": "background.js"
   },
   "host_permissions": [
-    "https://fleet.yango.com/*"
+    "https://fleet.yango.com/*",
+    "http://127.0.0.1:8000/*"
   ],
   "content_scripts": [
     {

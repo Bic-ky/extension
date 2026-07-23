@@ -9,11 +9,62 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } catch (err) {
       sendResponse({ success: false, error: err.message });
     }
-  } else if (message.action === 'scrape_subvention') {
+  }else if (message.action === 'scrape_vehicle') {
+    try {
+      const result = performVehicleScrape();
+      sendResponse(result);
+    } catch (err) {
+      sendResponse({ success: false, error: err.message });
+    }
+  }
+   else if (message.action === 'scrape_subvention') {
     // 🌟 ADDED: Listener for the subvention (bonuses) scrape
     try {
       const result = performSubventionScrape(message.targetDate);
       sendResponse(result);
+    } catch (err) {
+      sendResponse({ success: false, error: err.message });
+    }
+  } else if (message.action === 'scrape_gps_dom') {
+    try {
+      const rawPageText = document.body.innerText;
+      
+      // 1. Remove all spaces so we bypass Yango's weird "07 / 20 / 2026" HTML gaps
+      const compactPageText = rawPageText.replace(/\s+/g, '');
+      
+      // 2. Format the target date (2026-07-20 -> 07/20/2026)
+      const [year, month, day] = message.startDate.split('-');
+      const targetDateCompact = `${month}/${day}/${year}`;
+      const driverNameCompact = message.driverName.replace(/\s+/g, '');
+
+      // 3. STRICT READY CHECK: The page must have the Driver's Name AND the exact Date
+      const isReady = compactPageText.includes(driverNameCompact) && 
+                      compactPageText.includes(targetDateCompact) &&
+                      rawPageText.includes('Total mileage');
+
+      if (!isReady) {
+        // Tell popup.js the page isn't fully loaded yet, keep trying!
+        return sendResponse({ success: true, isReady: false });
+      }
+      
+      // Helper to find the number before "km" for a specific label
+      const getGpsValue = (label) => {
+        const escapedLabel = label.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        const regex = new RegExp(`${escapedLabel}\\s*\\n*\\s*([\\d\\.]+)\\s*km`, 'i');
+        const match = rawPageText.match(regex);
+        return match && match[1] ? parseFloat(match[1]) : 0;
+      };
+
+      sendResponse({
+        success: true,
+        isReady: true, // Safe to proceed!
+        gpsData: {
+          total_gps_mileage: getGpsValue('Total mileage'),
+          active_mileage: getGpsValue('Active mileage'),
+          idle_mileage: getGpsValue('Idle mileage'),
+          offline_mileage: getGpsValue('Offline')
+        }
+      });
     } catch (err) {
       sendResponse({ success: false, error: err.message });
     }
@@ -174,6 +225,7 @@ function performTextStreamScrape() {
   const cashStr = getValueForLabel('Cash') || extractByRegex(pageText, 'Cash');
   const promoStr = getValueForLabel('Promotion compensation') || extractByRegex(pageText, 'Promotion compensation');
   const bonusStr = getValueForLabel('Bonus') || extractByRegex(pageText, 'Bonus');
+  const taxesStr=  getValueForLabel('Taxes and fees')  || extractByRegex(pageText, 'Taxes and fees');
   const feesStr = getValueForLabel('Partner fees') || extractByRegex(pageText, 'Partner fees');
   const totalStr = getValueForLabel('TOTAL') || getValueForLabel('Taxi meter amount') || extractByRegex(pageText, 'TOTAL');
   const hoursStr = getValueForLabel('Working hours') || getValueForLabel('Online hours') || extractByRegex(pageText, 'Working hours', true);
@@ -189,6 +241,7 @@ function performTextStreamScrape() {
       cash: num(cashStr),
       promotion: num(promoStr),
       bonus: num(bonusStr),
+      taxes: num(taxesStr),
       partner_fees: num(feesStr),
       total_collection: num(totalStr),
       working_hours: hoursStr,
@@ -203,4 +256,67 @@ function num(v) {
   let s = String(v).replace(/[\u2212\u2013\u2014]/g, '-');
   const n = parseFloat(s.replace(/[^0-9.\-]/g, ''));
   return isNaN(n) ? 0 : n;
+}
+
+// --- UPDATED VEHICLE TAB SCRAPER (content.js) ---
+function performVehicleScrape() {
+  const pageText = document.body.innerText;
+  
+  let plateNumber = '';
+  let vehicleDetail = '';
+
+  // 🌟 STRATEGY 1: Target the specific string next to the "Unlink" button
+  const unlinkMatch = pageText.match(/([A-Za-z0-9-]+)\s*[•·-]\s*([A-Za-z0-9\s]+?)\s*[•·-]\s*(Active|Inactive|Blocked|Disabled|Draft)/i);
+  if (unlinkMatch) {
+    plateNumber = unlinkMatch[1].trim();
+    const specs = unlinkMatch[2].replace(/\s+/g, ' ').trim();
+    const status = unlinkMatch[3].trim();
+    vehicleDetail = `${specs} • ${status}`;
+  }
+
+  // 🌟 STRATEGY 2: Read directly from the rendered text layout
+  if (!vehicleDetail || vehicleDetail === 'N/A') {
+    // Helper to find the text rendered visually next to a label
+    const extractField = (label) => {
+      const els = Array.from(document.querySelectorAll('div, span, label, p'))
+                       .filter(el => el.innerText && el.innerText.trim() === label);
+      if (els.length > 0) {
+        let parent = els[0].parentElement;
+        for (let i = 0; i < 4 && parent; i++) {
+          let parts = parent.innerText.split('\n').map(t => t.trim()).filter(t => t && t !== label && !t.includes('(?)'));
+          if (parts.length > 0) return parts[0];
+          parent = parent.parentElement;
+        }
+      }
+      return '';
+    };
+
+    const make = extractField('Make');
+    const model = extractField('Model');
+    const year = extractField('Year');
+    const color = extractField('Color');
+    const status = extractField('Status');
+    const plate = extractField('Vehicle plate number');
+
+    if (!plateNumber && plate) plateNumber = plate;
+
+    const specsParts = [make, model, year, color].filter(Boolean).join(' ');
+    if (specsParts) {
+      vehicleDetail = status ? `${specsParts} • ${status}` : specsParts;
+    }
+  }
+
+  // 🌟 STRATEGY 3: Final Fallback for Plate Number from the top header
+  if (!plateNumber || plateNumber === 'N/A') {
+    const headerMatch = pageText.match(/Driver\s*[•·]\s*([A-Za-z0-9-]+)\s*[•·]/i);
+    if (headerMatch) plateNumber = headerMatch[1].trim();
+  }
+
+  return {
+    success: true,
+    vehicleData: {
+      vehicle_plate_number: plateNumber || 'N/A',
+      vehicle_detail: vehicleDetail || 'N/A'
+    }
+  };
 }

@@ -340,6 +340,13 @@
     <div class="card">
   <div class="card-title">Actions</div>
   <div class="btn-group">
+    <!-- Add this to your popup.html -->
+<div id="work-terms-section" style="margin-bottom: 15px;">
+  <label style="font-weight: bold; display: block; margin-bottom: 5px;">Filter by Work Terms (Optional):</label>
+  <div id="work-terms-list" style="max-height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px; border-radius: 4px;">
+    <span style="color: #666; font-style: italic;">Loading work terms...</span>
+  </div>
+</div>
     <button id="scrapeExportBtn" class="btn-primary" disabled>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
       Fetch &amp; Export All to Excel
