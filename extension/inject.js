@@ -1,6 +1,5 @@
 // inject.js
 (function() {
-    console.log("Fleet Extension: API Interceptor Active");
 
     // Intercept Fetch API
     const originalFetch = window.fetch;
@@ -19,7 +18,7 @@
                     type: 'YANGO_API_INTERCEPT',
                     url: url,
                     data: data
-                }, '*');
+                }, window.location.origin);
             } catch (e) {
                 console.error("Fleet Extension: Failed to parse intercept data", e);
             }
@@ -46,7 +45,7 @@
                         type: 'YANGO_API_INTERCEPT',
                         url: this._url,
                         data: data
-                    }, '*');
+                    }, window.location.origin);
                 } catch (e) {
                     // Not JSON or parse error
                 }

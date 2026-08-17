@@ -29,38 +29,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       const rawPageText = document.body.innerText;
       
-      // 1. Remove all spaces so we bypass Yango's weird "07 / 20 / 2026" HTML gaps
       const compactPageText = rawPageText.replace(/\s+/g, '');
-      
-      // 2. Format the target date (2026-07-20 -> 07/20/2026)
-      const [year, month, day] = message.startDate.split('-');
-      const targetDateCompact = `${month}/${day}/${year}`;
       const driverNameCompact = message.driverName.replace(/\s+/g, '');
 
-      // 3. STRICT READY CHECK: The page must have the Driver's Name AND the exact Date
+      // Check if the page has loaded the new UI elements
       const isReady = compactPageText.includes(driverNameCompact) && 
-                      compactPageText.includes(targetDateCompact) &&
-                      rawPageText.includes('Total mileage');
+                      rawPageText.includes('Total mileage') &&
+                      rawPageText.includes('Trip in progress');
 
       if (!isReady) {
-        // Tell popup.js the page isn't fully loaded yet, keep trying!
         return sendResponse({ success: true, isReady: false });
       }
       
-      // Helper to find the number before "km" for a specific label
+      // 🌟 UPDATED HELPER: Bulletproof regex for the new UI
       const getGpsValue = (label) => {
         const escapedLabel = label.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-        const regex = new RegExp(`${escapedLabel}\\s*\\n*\\s*([\\d\\.]+)\\s*km`, 'i');
+        
+        // This regex looks for the label, then ignores ANY non-digit characters 
+        // (which skips the '?', hidden spaces, and newlines), grabs the number, and checks for 'km'
+        const regex = new RegExp(`${escapedLabel}[^0-9]*?([\\d\\.]+)\\s*km`, 'i');
         const match = rawPageText.match(regex);
+        
         return match && match[1] ? parseFloat(match[1]) : 0;
       };
 
       sendResponse({
         success: true,
-        isReady: true, // Safe to proceed!
+        isReady: true,
         gpsData: {
           total_gps_mileage: getGpsValue('Total mileage'),
-          active_mileage: getGpsValue('Active mileage'),
+          active_mileage: getGpsValue('Trip in progress'),
           idle_mileage: getGpsValue('Idle mileage'),
           offline_mileage: getGpsValue('Offline')
         }

@@ -1,70 +1,79 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
+from fastapi.responses import JSONResponse
+from db_connection import engine
 import models
-import schemas
-from db_connection import engine, get_db
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from routers import auth, admin, packages, fields, data, inquiry, reviews
 import logging
-import traceback
+
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    limiter = Limiter(key_func=get_remote_address)
+    HAS_LIMITER = True
+except ImportError:
+    HAS_LIMITER = False
+
 logger = logging.getLogger("uvicorn.error")
-# Auto-create the table in PostgreSQL if it doesn't exist yet
-models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Yango Fleet Exporter API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    models.Base.metadata.create_all(bind=engine)
+    seed_packages()
+    yield
+    # Shutdown
 
-# Allow the Chrome Extension to talk to this backend
+def seed_packages():
+    from db_connection import SessionLocal
+    db = SessionLocal()
+    try:
+        default_packages = [
+            {"name": "data_scraping", "display_name": "Data Scraping", "description": "Scrape contractor earnings and metrics from Yango Fleet"},
+            {"name": "db_sync", "display_name": "DB Sync", "description": "Sync scraped data to database and access via API"},
+        ]
+        for pkg_data in default_packages:
+            existing = db.query(models.Package).filter(models.Package.name == pkg_data["name"]).first()
+            if not existing:
+                db.add(models.Package(**pkg_data))
+        db.commit()
+        logger.info("Default packages seeded.")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Package seeding failed: {e}")
+    finally:
+        db.close()
+
+app = FastAPI(title="Yango Fleet Exporter API", lifespan=lifespan)
+
+if HAS_LIMITER:
+    app.state.limiter = limiter
+    @app.exception_handler(RateLimitExceeded)
+    async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*", "chrome-extension://*"], # Allows your extension to push data
+    allow_origins=[
+        "chrome-extension://*",
+        "http://127.0.0.1:8000",
+    ],
     allow_credentials=True,
-    allow_methods=["POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-@app.post("/api/upload", status_code=status.HTTP_201_CREATED)
-def receive_pipeline_data(payload: schemas.BulkDataPayload, db: Session = Depends(get_db)):
-    try:
-        rows = [
-            {
-                "trip_date": item.Trip_Date,
-                "rider_name": item.Rider_Name,
-                "phone_number": item.Phone_Number,
-                "driver_id": item.ID,
-                "completed_rides": item.Completed_Rides,
-                "total_mileage": item.Total_Mileage,
-                "cash": item.Cash,
-                "promotion_compensation": item.Promotion_Compensation,
-                "bonus": item.Bonus,
-                "partner_fees": item.Partner_Fees,
-                "total_collection": item.Total_Collection,
-                "online_hours": item.Online_Hours,
-                "average_hourly_earnings": item.Average_Hourly_Earnings,
-                "achieved_goal": item.Achieved_Goal,
-                "target_goal": item.Target_Goal,
-                "subvention_bonus": item.Subvention_Bonus,
-            }
-            for item in payload.data
-        ]
+# Register all routers
+app.include_router(auth.router)
+app.include_router(admin.router)
+app.include_router(packages.router)
+app.include_router(fields.router)
+app.include_router(data.router)
+app.include_router(inquiry.router)
+app.include_router(reviews.router)
 
-        stmt = pg_insert(models.FleetData).values(rows)
-        update_cols = {c: stmt.excluded[c] for c in rows[0] if c not in ("trip_date", "driver_id")}
-
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_trip_date_driver",
-            set_=update_cols,
-        )
-
-        db.execute(stmt)
-        db.commit()
-
-        return {
-            "status": "success",
-            "message": f"Upserted {len(rows)} records.",
-        }
-
-    except Exception as e:
-        db.rollback()
-        logger.error("Upload failed: %s", e)
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Database insertion failed: {str(e)}")
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}

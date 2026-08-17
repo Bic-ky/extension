@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; connect-src http://127.0.0.1:8000;">
+  <title>Fleet Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="admin_dashboard.css">
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-icon">🛡️</div>
+      <h2>Fleet Admin</h2>
+    </div>
+    <nav class="sidebar-nav" role="navigation" aria-label="Admin navigation">
+      <button class="nav-item active" data-target="section-dashboard" aria-current="page">
+        <span class="icon">📊</span>
+        <span>Dashboard</span>
+      </button>
+      <button class="nav-item" data-target="section-users">
+        <span class="icon">👥</span>
+        <span>Users</span>
+      </button>
+      <button class="nav-item" data-target="section-dbaccess">
+        <span class="icon">🔄</span>
+        <span>Database Access</span>
+      </button>
+      <button class="nav-item" data-target="section-inquiries">
+        <span class="icon">💬</span>
+        <span>Inquiries</span>
+      </button>
+      <button class="nav-item" data-target="section-metrics">
+        <span class="icon">📈</span>
+        <span>Metrics</span>
+      </button>
+    </nav>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <header class="top-header">
+      <div class="header-title">
+        <h1>Dashboard Overview</h1>
+        <p class="subtitle" id="current-date-display">Loading...</p>
+      </div>
+      <div class="header-actions">
+        <div class="admin-profile">
+          <span class="admin-name" id="admin-name-display">Admin</span>
+          <div class="admin-avatar">A</div>
+        </div>
+        <button id="logoutBtn" class="btn btn-outline-danger">Logout</button>
+      </div>
+    </header>
+
+    <div class="content-container">
+      <!-- Section: Dashboard -->
+      <section id="section-dashboard" class="content-section active">
+        <div class="stat-grid">
+          <div class="stat-card accent-primary">
+            <div class="stat-title">Total Users</div>
+            <div class="stat-value" id="stat-total-users">-</div>
+          </div>
+          <div class="stat-card accent-success">
+            <div class="stat-title">Active Users</div>
+            <div class="stat-value" id="stat-active-users">-</div>
+          </div>
+          <div class="stat-card accent-warning">
+            <div class="stat-title">Total Scrapes</div>
+            <div class="stat-value" id="stat-total-scrapes">-</div>
+          </div>
+          <div class="stat-card accent-info">
+            <div class="stat-title">Total Records</div>
+            <div class="stat-value" id="stat-total-records">-</div>
+          </div>
+        </div>
+        
+        <div class="card mt-4">
+          <div class="card-header">
+            <h3>Recent Global Activity</h3>
+          </div>
+          <div class="card-body">
+            <div id="recent-activity-feed" class="activity-feed">
+              Loading activity...
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Users -->
+      <section id="section-users" class="content-section">
+        <div class="card mb-4">
+          <div class="card-header">
+            <h3>Create New User</h3>
+          </div>
+          <div class="card-body">
+            <form id="create-user-form" class="form-grid">
+              <div class="form-group">
+                <label for="new-user-name">Full Name</label>
+                <input type="text" id="new-user-name" class="form-control" placeholder="Jane Doe" required>
+              </div>
+              <div class="form-group">
+                <label for="new-user-email">Email Address</label>
+                <input type="email" id="new-user-email" class="form-control" placeholder="jane@example.com" required>
+              </div>
+              <div class="form-group">
+                <label for="new-user-password">Password</label>
+                <input type="password" id="new-user-password" class="form-control" placeholder="Min 6 characters" required>
+              </div>
+              <div class="form-group checkbox-group">
+                <label class="checkbox-container">
+                  <input type="checkbox" id="new-user-dbsync">
+                  <span class="checkmark"></span>
+                  Grant DB Sync Package
+                </label>
+                <button type="submit" class="btn btn-primary" id="btn-create-user">Create User</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3>Manage Users</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="users-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Packages</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="6" class="text-center">Loading users...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Database Access -->
+      <section id="section-dbaccess" class="content-section">
+        <div class="card">
+          <div class="card-header">
+            <h3>Pending Package Requests</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="requests-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Package Name</th>
+                  <th>Status</th>
+                  <th>Requested At</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="5" class="text-center">Loading requests...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Inquiries -->
+      <section id="section-inquiries" class="content-section">
+        <div class="card">
+          <div class="card-header">
+            <h3>User Inquiries</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="inquiries-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Subject</th>
+                  <th>Message</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="5" class="text-center">Loading inquiries...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Metrics -->
+      <section id="section-metrics" class="content-section">
+        <div class="card">
+          <div class="card-header">
+            <h3>Detailed User Metrics</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="metrics-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Total Scrapes</th>
+                  <th>Total Rows</th>
+                  <th>Last Scrape</th>
+                  <th>Recent Logs</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="5" class="text-center">Loading metrics...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="admin_dashboard.js"></script>
+</body>
+</html>

@@ -79,6 +79,45 @@
       color: var(--text-muted);
     }
 
+    /* Tabs */
+    .tab-bar {
+      display: flex;
+      gap: 4px;
+      background: #e9ecef;
+      padding: 4px;
+      border-radius: var(--radius);
+      overflow-x: auto;
+    }
+    .tab {
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 6px;
+      color: var(--text-muted);
+      transition: var(--transition);
+      white-space: nowrap;
+    }
+    .tab.active {
+      background: var(--card-bg);
+      color: var(--primary);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .panel {
+      display: none;
+      opacity: 0;
+      transform: translateY(5px);
+      transition: opacity 0.3s, transform 0.3s;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .panel.active {
+      display: flex;
+      opacity: 1;
+      transform: translateY(0);
+    }
+
     /* Cards */
     .card {
       background-color: var(--card-bg);
@@ -182,7 +221,7 @@
       color: var(--text-muted);
     }
 
-    input[type="date"] {
+    input[type="text"], input[type="email"], input[type="password"], input[type="date"], textarea {
       padding: 8px 10px;
       border: 1px solid var(--border-color);
       border-radius: 6px;
@@ -192,12 +231,19 @@
       background-color: var(--bg-color);
       outline: none;
       transition: var(--transition);
+      width: 100%;
+      box-sizing: border-box;
     }
 
-    input[type="date"]:focus {
+    input:focus, textarea:focus {
       border-color: var(--primary);
       background-color: var(--card-bg);
       box-shadow: 0 0 0 2px rgba(52, 58, 64, 0.1);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 60px;
     }
 
     /* Buttons */
@@ -283,88 +329,249 @@
       border-left-color: var(--warning);
       background-color: #fffef5;
     }
+
+    /* Auth Screen Styles */
+    .auth-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 350px;
+    }
+    .auth-logo {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .auth-logo h1 {
+      margin: 0;
+      font-size: 18px;
+      color: var(--primary);
+    }
+    .auth-logo p {
+      margin: 4px 0 0 0;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .auth-form {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      gap: 12px;
+    }
+    .auth-msg {
+      font-size: 12px;
+      text-align: center;
+      min-height: 18px;
+      margin-bottom: 8px;
+    }
+    .auth-msg.error { color: var(--danger); }
+    .auth-msg.info { color: var(--warning); }
+    .auth-msg.success { color: var(--success); }
+
+    /* Star Rating */
+    .star-rating {
+      display: flex;
+      gap: 4px;
+      font-size: 24px;
+      color: var(--border-color);
+      cursor: pointer;
+    }
+    .star-rating span {
+      transition: color 0.2s;
+    }
+    .star-rating span.active, .star-rating span:hover, .star-rating span:hover ~ span {
+      /* Handled by JS for proper hover effect */
+    }
+    
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+    }
+    
+    .inquiry-item, .review-item {
+      padding: 8px;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 12px;
+    }
+    .inquiry-item:last-child, .review-item:last-child {
+      border-bottom: none;
+    }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div id="auth-screen" class="container">
+    <div class="card auth-wrapper">
+      <div class="auth-logo">
+        <h1>Fleet Exporter</h1>
+        <p>Please sign in to continue</p>
+      </div>
+      
+      <div id="auth-msg" class="auth-msg"></div>
+
+      <form id="login-form" class="auth-form">
+        <input type="email" id="login-email" placeholder="Email" required>
+        <input type="password" id="login-password" placeholder="Password" required>
+        <button type="submit" class="btn-primary">Login</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="app-screen" class="container" style="display:none">
     <header>
       <div class="logo-section">
-        <h1>Yango Fleet Exporter</h1>
+        <h1 id="app-header-title">Yango Fleet Exporter</h1>
         <p>Driver Profile &amp; Metrics Scraper</p>
       </div>
-
-      <button id="closeBtn" style="position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 24px; cursor: pointer; color: #666; line-height: 1;">
-        &times;
-      </button>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <button id="logoutBtn" style="background: none; border: 1px solid var(--border-color); border-radius: 4px; font-size: 11px; padding: 4px 8px; cursor: pointer; color: var(--text-main);">Logout</button>
+        <button id="closeBtn" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666; line-height: 1;">&times;</button>
+      </div>
     </header>
 
-    <!-- Status Card -->
-    <div class="card">
-      <div class="card-title">System Status</div>
-      
-      <div class="status-row">
-        <span class="status-label">Authentication:</span>
-        <span id="authStatus" class="badge badge-error">
-          <span class="badge-dot"></span><span id="authStatusText">Disconnected</span>
-        </span>
+    <div class="tab-bar" id="module-tabs">
+      <div class="tab" data-target="panel-admin" id="tab-admin" style="display:none; color: var(--danger);">🛡️ Admin</div>
+      <div class="tab" data-target="panel-scraping" id="tab-scraping" style="display:none">📊 Data Scraping</div>
+      <div class="tab" data-target="panel-dbsync" id="tab-dbsync" style="display:none">🔄 DB Sync</div>
+      <div class="tab" data-target="panel-inquiry" id="tab-inquiry">💬 Inquiry</div>
+      <div class="tab" data-target="panel-review" id="tab-review">⭐ Review</div>
+    </div>
+
+    <!-- Data Scraping Panel -->
+    <div id="panel-scraping" class="panel">
+      <!-- Field Configuration -->
+      <div class="card">
+        <div class="card-title">Field Configuration</div>
+        <div class="form-row" id="field-config-container">
+          <div class="form-group" id="required-fields-list">
+            <label>Required</label>
+            <!-- Checkboxes generated by JS -->
+          </div>
+          <div class="form-group" id="optional-fields-list">
+            <label>Optional</label>
+            <!-- Checkboxes generated by JS -->
+          </div>
+        </div>
       </div>
 
-      <div class="status-row">
-        <span class="status-label">API Config:</span>
-        <span id="apiStatus" class="badge badge-success">
-          <span class="badge-dot"></span><span id="apiStatusText">Auto-Detect Ready</span>
-        </span>
+      <!-- Status Card -->
+      <div class="card">
+        <div class="card-title">System Status</div>
+        <div class="status-row">
+          <span class="status-label">Authentication:</span>
+          <span id="authStatus" class="badge badge-error">
+            <span class="badge-dot"></span><span id="authStatusText">Disconnected</span>
+          </span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">API Config:</span>
+          <span id="apiStatus" class="badge badge-success">
+            <span class="badge-dot"></span><span id="apiStatusText">Auto-Detect Ready</span>
+          </span>
+        </div>
+        <div id="apiInfoBox" class="info-box">
+          API endpoint will be detected automatically on run. No manual page loads required.
+        </div>
       </div>
-      
-      <div id="apiInfoBox" class="info-box">
-        API endpoint will be detected automatically on run. No manual page loads required.
+
+      <!-- Configuration Card -->
+      <div class="card">
+        <div class="card-title">Scraping Window</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="startDate">Start Date</label>
+            <input type="date" id="startDate">
+          </div>
+          <div class="form-group">
+            <label for="endDate">End Date</label>
+            <input type="date" id="endDate">
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions Card -->
+      <div class="card">
+        <div class="card-title">Actions</div>
+        <div class="btn-group">
+          <div id="work-terms-section" style="margin-bottom: 15px;">
+            <label style="font-weight: bold; display: block; margin-bottom: 5px;">Filter by Work Terms (Optional):</label>
+            <div id="work-terms-list" style="max-height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px; border-radius: 4px;">
+              <span style="color: #666; font-style: italic;">Loading work terms...</span>
+            </div>
+          </div>
+          <button id="scrapeExportBtn" class="btn-primary" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            Fetch &amp; Export All to Excel
+          </button>
+          <button id="stopExportBtn" style="display: none; background-color: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
+            Stop &amp; Export
+          </button>
+          <button id="clearDataBtn" class="btn-secondary">Clear Data</button>
+        </div>
+      </div>
+
+      <!-- Terminal Output -->
+      <div class="card">
+        <div class="card-title">Activity Log</div>
+        <div id="consoleLog" class="console">Ready...</div>
       </div>
     </div>
 
-    <!-- Configuration Card -->
-    <div class="card">
-      <div class="card-title">Scraping Window</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="startDate">Start Date</label>
-          <input type="date" id="startDate">
-        </div>
-        <div class="form-group">
-          <label for="endDate">End Date</label>
-          <input type="date" id="endDate">
-        </div>
+    <!-- Admin Panel -->
+    <div id="panel-admin" class="panel">
+      <div class="card" style="text-align: center; padding: 20px;">
+        <div class="card-title">🛡️ Admin Dashboard</div>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Manage users, view metrics, and handle requests in the full dashboard.</p>
+        <button id="openAdminDashboard" class="btn-primary" style="width: 100%;">Open Full Dashboard</button>
       </div>
     </div>
 
-    <!-- Actions Card -->
-    <div class="card">
-  <div class="card-title">Actions</div>
-  <div class="btn-group">
-    <!-- Add this to your popup.html -->
-<div id="work-terms-section" style="margin-bottom: 15px;">
-  <label style="font-weight: bold; display: block; margin-bottom: 5px;">Filter by Work Terms (Optional):</label>
-  <div id="work-terms-list" style="max-height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px; border-radius: 4px;">
-    <span style="color: #666; font-style: italic;">Loading work terms...</span>
-  </div>
-</div>
-    <button id="scrapeExportBtn" class="btn-primary" disabled>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-      Fetch &amp; Export All to Excel
-    </button>
+    <!-- DB Sync Panel -->
+    <div id="panel-dbsync" class="panel">
+      <div class="card">
+        <div class="card-title">DB Sync Status</div>
+        <div id="sync-stats" style="font-size: 12px;">Loading...</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Recent Data Preview</div>
+        <div id="data-preview" style="font-size: 11px; max-height: 150px; overflow-y: auto;"></div>
+        <button id="refreshDataBtn" class="btn-secondary">Refresh</button>
+      </div>
+    </div>
 
-    <!-- Add this next to your existing Scrape/Export button -->
-    <button id="stopExportBtn" style="display: none; background-color: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
-      Stop & Export
-    </button>
+    <!-- Inquiry Panel -->
+    <div id="panel-inquiry" class="panel">
+      <div class="card">
+        <div class="card-title">Submit Inquiry</div>
+        <input type="text" id="inquiry-subject" placeholder="Subject">
+        <textarea id="inquiry-message" placeholder="Message"></textarea>
+        <button id="submitInquiryBtn" class="btn-primary">Submit</button>
+      </div>
+      <div class="card">
+        <div class="card-title">My Inquiries</div>
+        <div id="inquiries-list" style="max-height: 200px; overflow-y: auto;"></div>
+      </div>
+    </div>
 
-    <button id="clearDataBtn" class="btn-secondary">Clear Data</button>
-  </div>
-</div>
-
-    <!-- Terminal Output -->
-    <div class="card">
-      <div class="card-title">Activity Log</div>
-      <div id="consoleLog" class="console">Ready...</div>
+    <!-- Review Panel -->
+    <div id="panel-review" class="panel">
+      <div class="card">
+        <div class="card-title">Leave a Review</div>
+        <div class="star-rating" id="review-stars">
+          <span data-value="1">★</span>
+          <span data-value="2">★</span>
+          <span data-value="3">★</span>
+          <span data-value="4">★</span>
+          <span data-value="5">★</span>
+        </div>
+        <textarea id="review-comment" placeholder="Comment"></textarea>
+        <button id="submitReviewBtn" class="btn-primary">Submit</button>
+      </div>
+      <div class="card">
+        <div class="card-title">All Reviews</div>
+        <div id="reviews-list" style="max-height: 200px; overflow-y: auto;"></div>
+      </div>
     </div>
   </div>
 

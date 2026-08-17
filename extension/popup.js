@@ -1,7 +1,13 @@
-// popup.js
-// Main control panel logic for Yango Fleet Contractor Exporter
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Unhandled promise rejection:', event.reason);
+  event.preventDefault();
+});
 
-// UI Elements
+const API_BASE = 'http://127.0.0.1:8000';
+let currentUser = null;
+let appInitialized = false;
+
+// UI Elements (Existing + New)
 const closeBtn = document.getElementById('closeBtn');
 const authStatus = document.getElementById('authStatus');
 const authStatusText = document.getElementById('authStatusText');
@@ -11,10 +17,8 @@ const apiInfoBox = document.getElementById('apiInfoBox');
 const startDateInput = document.getElementById('startDate');
 const endDateInput = document.getElementById('endDate');
 const scrapeExportBtn = document.getElementById('scrapeExportBtn');
-const scrapeActiveBtn = document.getElementById('scrapeActiveBtn');
 const clearDataBtn = document.getElementById('clearDataBtn');
 const consoleLog = document.getElementById('consoleLog');
-
 const stopExportBtn = document.getElementById('stopExportBtn');
 
 // Configuration State
@@ -22,13 +26,426 @@ let parkId = null;
 let detectedEndpoint = null;
 let stopRequested = false;
 
-// Initialize Popup
+// Token Helper
+async function getAuthHeaders() {
+  const token = (await chrome.storage.local.get(['access_token'])).access_token;
+  return {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  };
+}
+
+// Auth functions
+async function checkSession() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['access_token'], async (result) => {
+      if (!result.access_token) return resolve(null);
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/me`, {
+          headers: { 'Authorization': `Bearer ${result.access_token}` }
+        });
+        if (res.ok) {
+          const user = await res.json();
+          resolve(user);
+        } else {
+          resolve(null);
+        }
+      } catch (err) {
+        resolve(null);
+      }
+    });
+  });
+}
+
+async function handleLogin(email, password) {
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  
+  if (res.status === 403) {
+    const errorData = await res.json();
+    throw new Error(errorData.detail || 'Forbidden');
+  } else if (res.status === 401) {
+    throw new Error('Invalid email or password');
+  } else if (!res.ok) {
+    throw new Error('Login failed');
+  }
+  
+  const data = await res.json();
+  await chrome.storage.local.set({ access_token: data.access_token });
+  return data.user;
+}
+
+function handleLogout() {
+  chrome.storage.local.remove(['access_token'], () => {
+    currentUser = null;
+    showAuthScreen();
+  });
+}
+
+function showAuthScreen() {
+  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'block';
+}
+
+function showAppScreen(user) {
+  currentUser = user;
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'flex';
+  
+  if (user && user.full_name) {
+    document.getElementById('app-header-title').textContent = `Welcome, ${user.full_name}`;
+  } else {
+    document.getElementById('app-header-title').textContent = `Yango Fleet Exporter`;
+  }
+  
+  // Tab visibility based on packages
+  const activePackages = user.packages || [];
+  const hasDataScraping = activePackages.some(p => p.name === 'data_scraping' && p.status === 'active');
+  const hasDbSync = activePackages.some(p => p.name === 'db_sync' && p.status === 'active');
+  
+  const tabScraping = document.getElementById('tab-scraping');
+  const tabDbSync = document.getElementById('tab-dbsync');
+  const tabAdmin = document.getElementById('tab-admin');
+  
+  if (hasDataScraping) tabScraping.style.display = 'block';
+  else tabScraping.style.display = 'none';
+  
+  if (hasDbSync) tabDbSync.style.display = 'block';
+  else tabDbSync.style.display = 'none';
+  
+  if (user && user.role === 'admin') {
+    if (tabAdmin) tabAdmin.style.display = 'block';
+  } else {
+    if (tabAdmin) tabAdmin.style.display = 'none';
+  }
+
+
+  
+  // Pick first available tab
+  if (hasDataScraping) switchTab('panel-scraping');
+  else if (hasDbSync) switchTab('panel-dbsync');
+  else switchTab('panel-inquiry');
+}
+
+// Module navigation
+function switchTab(panelId) {
+  // Hide all panels
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  // Remove active from all tabs
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  
+  // Show target
+  const targetPanel = document.getElementById(panelId);
+  const targetTab = document.querySelector(`.tab[data-target="${panelId}"]`);
+  
+  if (targetPanel) targetPanel.classList.add('active');
+  if (targetTab) targetTab.classList.add('active');
+  
+  // Load content dynamically
+  if (panelId === 'panel-dbsync') {
+    loadSyncStats();
+    loadDataPreview();
+  } else if (panelId === 'panel-inquiry') {
+    loadMyInquiries();
+  } else if (panelId === 'panel-review') {
+    loadAllReviews();
+  }
+}
+
+// Field config functions
+async function loadFieldConfig() {
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${API_BASE}/api/fields/config`, { headers });
+    if (!res.ok) return;
+    const data = await res.json();
+    
+    const reqList = document.getElementById('required-fields-list');
+    const optList = document.getElementById('optional-fields-list');
+    
+    // Clear lists (keep label)
+    reqList.innerHTML = '<label>Required</label>';
+    optList.innerHTML = '<label>Optional</label>';
+    
+    // Required fields (locked)
+    if (data.required_fields) {
+      data.required_fields.forEach(field => {
+        const div = document.createElement('div');
+        div.className = 'checkbox-item';
+        div.innerHTML = `<input type="checkbox" checked disabled> 🔒 ${field}`;
+        reqList.appendChild(div);
+      });
+    }
+    
+    // Optional fields
+    const optional = ["Vehicle_Plate_Number", "Vehicle_Detail", "Subvention_Bonus", "Promotion_Compensation", "Total_GPS_Mileage", "Active_Mileage", "Idle_Mileage", "Offline_Mileage"];
+    optional.forEach(field => {
+      const div = document.createElement('div');
+      div.className = 'checkbox-item';
+      div.innerHTML = `<input type="checkbox" id="field_${field}"> ${field}`;
+      optList.appendChild(div);
+    });
+  } catch (e) {
+    console.error("Error loading field config", e);
+  }
+}
+
+// DB Sync functions  
+async function loadSyncStats() {
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${API_BASE}/api/data/stats`, { headers });
+    if (res.ok) {
+      const stats = await res.json();
+      document.getElementById('sync-stats').innerHTML = `
+        Total Records: ${stats.total_records || 0}<br>
+        Total Drivers: ${stats.total_drivers || 0}<br>
+        Last Sync: ${stats.last_sync || 'Never'}
+      `;
+    }
+  } catch (e) {
+    document.getElementById('sync-stats').innerText = "Error loading stats";
+  }
+}
+
+async function syncData() {
+  logConsole("Data sync is handled automatically during Fetch & Export. Pushing cached data not fully implemented.");
+}
+
+async function loadDataPreview() {
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${API_BASE}/api/data?limit=10`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      const list = data.data || [];
+      const container = document.getElementById('data-preview');
+      if (list.length === 0) {
+        container.innerHTML = "No data available.";
+        return;
+      }
+      container.innerHTML = list.map(item => `
+        <div style="padding:4px; border-bottom:1px solid var(--border-color)">
+          ${item.trip_date || ''} - ${item.rider_name || 'Unknown'} - Rs ${item.total_collection || 0}
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    document.getElementById('data-preview').innerText = "Error loading data preview";
+  }
+}
+
+// Inquiry functions
+async function submitInquiry() {
+  const subject = document.getElementById('inquiry-subject').value;
+  const message = document.getElementById('inquiry-message').value;
+  if (!subject || !message) {
+    logConsole("Please fill in both subject and message");
+    return;
+  }
+  
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${API_BASE}/api/inquiries`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ subject, message })
+    });
+    
+    if (res.ok) {
+      document.getElementById('inquiry-subject').value = '';
+      document.getElementById('inquiry-message').value = '';
+      logConsole("Inquiry submitted successfully");
+      loadMyInquiries();
+    } else {
+      logConsole("Failed to submit inquiry");
+    }
+  } catch (e) {
+    console.error("Error submitting inquiry", e);
+  }
+}
+
+async function loadMyInquiries() {
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${API_BASE}/api/inquiries/my`, { headers });
+    if (res.ok) {
+      const inquiries = await res.json();
+      const container = document.getElementById('inquiries-list');
+      if (inquiries.length === 0) {
+        container.innerHTML = "No inquiries yet.";
+        return;
+      }
+      container.innerHTML = inquiries.map(i => `
+        <div class="inquiry-item">
+          <strong>${i.subject}</strong> <span class="badge ${i.status === 'resolved' ? 'badge-success' : 'badge-warning'}">${i.status}</span><br>
+          <span style="color: var(--text-muted)">${i.message}</span>
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    document.getElementById('inquiries-list').innerText = "Error loading inquiries";
+  }
+}
+
+// Review functions
+let selectedRating = 0;
+async function submitReview() {
+  const comment = document.getElementById('review-comment').value;
+  if (selectedRating === 0 || !comment) {
+    logConsole("Please select a rating and write a comment");
+    return;
+  }
+  
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${API_BASE}/api/reviews`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ rating: selectedRating, comment })
+    });
+    
+    if (res.ok) {
+      logConsole("Review submitted successfully");
+      loadAllReviews();
+    } else {
+      logConsole("Failed to submit review");
+    }
+  } catch (e) {
+    console.error("Error submitting review", e);
+  }
+}
+
+async function loadAllReviews() {
+  try {
+    // Reviews are public, but we can pass auth headers just in case
+    const res = await fetch(`${API_BASE}/api/reviews`);
+    if (res.ok) {
+      const reviews = await res.json();
+      const container = document.getElementById('reviews-list');
+      if (reviews.length === 0) {
+        container.innerHTML = "No reviews yet.";
+        return;
+      }
+      container.innerHTML = reviews.map(r => `
+        <div class="review-item">
+          <strong>${r.user_name || 'Anonymous'}</strong>: ${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}<br>
+          <span style="color: var(--text-muted)">${r.comment}</span>
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    document.getElementById('reviews-list').innerText = "Error loading reviews";
+  }
+}
+
+
+
+
+// Wire up events on DOMContentLoaded
 document.addEventListener('DOMContentLoaded', async () => {
+  const loginForm = document.getElementById('login-form');
+  const authMsg = document.getElementById('auth-msg');
+  const logoutBtn = document.getElementById('logoutBtn');
+  
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value;
+      const pass = document.getElementById('login-password').value;
+      try {
+        authMsg.textContent = 'Logging in...';
+        authMsg.className = 'auth-msg info';
+        const user = await handleLogin(email, pass);
+        authMsg.textContent = '';
+        showAppScreen(user);
+        initializeApp();
+      } catch (err) {
+        authMsg.textContent = err.message;
+        authMsg.className = 'auth-msg error';
+      }
+    });
+  }
+
+  if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+
+  const user = await checkSession();
+  if (user) {
+    showAppScreen(user);
+    initializeApp();
+  } else {
+    showAuthScreen();
+  }
+  
+  // Module Tabs logic
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      const target = e.target.getAttribute('data-target');
+      if (target) switchTab(target);
+    });
+  });
+  
+  // New buttons logic
+  const syncNowBtn = document.getElementById('syncNowBtn');
+  if (syncNowBtn) syncNowBtn.addEventListener('click', syncData);
+  
+  const refreshDataBtn = document.getElementById('refreshDataBtn');
+  if (refreshDataBtn) refreshDataBtn.addEventListener('click', loadDataPreview);
+  
+  const submitInquiryBtn = document.getElementById('submitInquiryBtn');
+  if (submitInquiryBtn) submitInquiryBtn.addEventListener('click', submitInquiry);
+  
+  const submitReviewBtn = document.getElementById('submitReviewBtn');
+  if (submitReviewBtn) submitReviewBtn.addEventListener('click', submitReview);
+  
+
+
+  const openAdminDashboard = document.getElementById('openAdminDashboard');
+  if (openAdminDashboard) {
+    openAdminDashboard.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('admin_dashboard.html') });
+    });
+  }
+  
+  // Star rating interactive logic
+  const stars = document.querySelectorAll('#review-stars span');
+  stars.forEach(star => {
+    star.addEventListener('mouseover', (e) => {
+      const val = parseInt(e.target.getAttribute('data-value'));
+      stars.forEach(s => {
+        const sVal = parseInt(s.getAttribute('data-value'));
+        s.style.color = sVal <= val ? '#f59f00' : 'var(--border-color)';
+      });
+    });
+    star.addEventListener('mouseout', () => {
+      stars.forEach(s => {
+        const sVal = parseInt(s.getAttribute('data-value'));
+        s.style.color = sVal <= selectedRating ? '#f59f00' : 'var(--border-color)';
+      });
+    });
+    star.addEventListener('click', (e) => {
+      selectedRating = parseInt(e.target.getAttribute('data-value'));
+      stars.forEach(s => {
+        const sVal = parseInt(s.getAttribute('data-value'));
+        s.style.color = sVal <= selectedRating ? '#f59f00' : 'var(--border-color)';
+      });
+    });
+  });
+});
+
+async function initializeApp() {
+  if (appInitialized) return;
+  appInitialized = true;
+  
   initializeDates();
   await checkAuth();
   await loadSavedEndpoint();
+  await loadFieldConfig();
   
-  // Wire up event listeners
+  // Wire up existing event listeners
   scrapeExportBtn.addEventListener('click', runFullExport);
   clearDataBtn.addEventListener('click', clearSavedEndpoint);
 
@@ -36,7 +453,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.close();
   });
   
-  // Listen for message from content script containing intercepted API data
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'YANGO_API_INTERCEPT') {
       handleApiIntercept(message);
@@ -48,7 +464,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     stopExportBtn.textContent = "Stopping...";
     stopExportBtn.disabled = true;
   });
-});
+}
 
 function parseActiveGoals(goalString) {
   let achieved = 0;
@@ -407,7 +823,7 @@ function getPreviousDayDateString(dateStr) {
   const dayValue = parseInt(dateParts[2], 10);
   
   const d = new Date(year, monthIndex, dayValue);
-  d.setDate(d.getDate() - 1);
+  d.setDate(d.getDate() + 1);
   
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -698,6 +1114,17 @@ async function runFullExport() {
   
   const allRows = [];
   
+  // Collect enabled fields for optimization
+  const enabledFields = new Set();
+  document.querySelectorAll('#optional-fields-list input[type="checkbox"]').forEach(cb => {
+    if (cb.checked) {
+      enabledFields.add(cb.id.replace('field_', ''));
+    }
+  });
+  const needsSubvention = enabledFields.has('Subvention_Bonus');
+  const needsGps = enabledFields.has('Total_GPS_Mileage') || enabledFields.has('Active_Mileage') || enabledFields.has('Idle_Mileage') || enabledFields.has('Offline_Mileage');
+  const needsVehicle = enabledFields.has('Vehicle_Plate_Number') || enabledFields.has('Vehicle_Detail');
+  
   try {
     let contractors = await fetchContractorList(parkId);
     if (!contractors || contractors.length === 0) {
@@ -875,36 +1302,40 @@ async function runFullExport() {
         }
 
         // SCRAPE ACTIVE GOALS
-        logConsole(`[${i+1}/${contractors.length}] Step 2: Loading Subventions for ${driver.full_name}...`);
-        const subventionUrl = `https://fleet.yango.com/contractors/${driver.id}/subvention?park_id=${parkId}`;
-        
-        await chrome.tabs.update(activeTab.id, { url: subventionUrl });
-        await new Promise(r => setTimeout(r, 2000));
-        
         let subventionData = null;
-        for (let attempt = 1; attempt <= 12; attempt++) {
-          await new Promise(r => setTimeout(r, 400));
-          try {
-            const ping = await new Promise(r => chrome.tabs.sendMessage(activeTab.id, { action: 'ping' }, res => r(chrome.runtime.lastError ? null : res)));
-            if (!ping) {
-              await chrome.scripting.executeScript({ target: { tabId: activeTab.id }, files: ['content.js'] });
-              await new Promise(r => setTimeout(r, 200));
-            }
-            
-            const scrape = await new Promise(r => chrome.tabs.sendMessage(activeTab.id, { 
-              action: 'scrape_subvention', 
-              targetDate: startDate 
-            }, res => r(chrome.runtime.lastError ? null : res)));
-            
-            if (scrape && scrape.success && scrape.isReady) { subventionData = scrape; break; }
-          } catch (e) {}
+        if (needsSubvention) {
+          logConsole(`[${i+1}/${contractors.length}] Step 2: Loading Subventions for ${driver.full_name}...`);
+          const subventionUrl = `https://fleet.yango.com/contractors/${driver.id}/subvention?park_id=${parkId}`;
+          
+          await chrome.tabs.update(activeTab.id, { url: subventionUrl });
+          await new Promise(r => setTimeout(r, 2000));
+          
+          for (let attempt = 1; attempt <= 12; attempt++) {
+            await new Promise(r => setTimeout(r, 400));
+            try {
+              const ping = await new Promise(r => chrome.tabs.sendMessage(activeTab.id, { action: 'ping' }, res => r(chrome.runtime.lastError ? null : res)));
+              if (!ping) {
+                await chrome.scripting.executeScript({ target: { tabId: activeTab.id }, files: ['content.js'] });
+                await new Promise(r => setTimeout(r, 200));
+              }
+              
+              const scrape = await new Promise(r => chrome.tabs.sendMessage(activeTab.id, { 
+                action: 'scrape_subvention', 
+                targetDate: startDate 
+              }, res => r(chrome.runtime.lastError ? null : res)));
+              
+              if (scrape && scrape.success && scrape.isReady) { subventionData = scrape; break; }
+            } catch (e) {}
+          }
         }
 
         
         //DOM METHOD: Step 3: Navigating to GPS tab and scraping UI...
-        logConsole(`[${i+1}/${contractors.length}] Step 3: Navigating to GPS tab for ${driver.full_name}...`);
-        
-        const gps = await fetchGpsViaTabNavigation(activeTab.id, driver.full_name, driver.id, parkId, startDate, endDate);
+        let gps = { total_gps_mileage: 0, active_mileage: 0, idle_mileage: 0, offline_mileage: 0 };
+        if (needsGps) {
+          logConsole(`[${i+1}/${contractors.length}] Step 3: Navigating to GPS tab for ${driver.full_name}...`);
+          gps = await fetchGpsViaTabNavigation(activeTab.id, driver.full_name, driver.id, parkId, startDate, endDate);
+        }
 
         const profileData = await fetchContractorProfileData(driver.id, parkId);
         
@@ -925,8 +1356,11 @@ async function runFullExport() {
             targetGoal = parseInt(goalMatch[2], 10);
           }
 
-        logConsole(`[${i+1}/${contractors.length}] Step: Loading Vehicle details for ${driver.full_name}...`);
-        const vehicleInfo = await fetchVehicleData(activeTab.id, driver.id, parkId);
+        let vehicleInfo = { vehicle_plate_number: 'N/A', vehicle_detail: 'N/A' };
+        if (needsVehicle) {
+          logConsole(`[${i+1}/${contractors.length}] Step: Loading Vehicle details for ${driver.full_name}...`);
+          vehicleInfo = await fetchVehicleData(activeTab.id, driver.id, parkId);
+        }
           
           allRows.push({
             Trip_Date: startDate,
@@ -969,23 +1403,31 @@ async function runFullExport() {
     
     if (allRows.length > 0) {
       logConsole("Data collection complete. Compiling Excel sheet...");
-      generateExcel(allRows, startDate, endDate);
+      // Filter based on checkboxes before exporting and sending to backend
+      const filteredRows = allRows.map(row => {
+        const newRow = { ...row };
+        const optional = ["Vehicle_Plate_Number", "Vehicle_Detail", "Subvention_Bonus", "Promotion_Compensation", "Total_GPS_Mileage", "Active_Mileage", "Idle_Mileage", "Offline_Mileage"];
+        optional.forEach(opt => {
+          if (!enabledFields.has(opt)) {
+            delete newRow[opt];
+          }
+        });
+        return newRow;
+      });
 
-      logConsole("Uploading data to backend...");
-      try {
-        await sendToBackend(allRows);
-        
-      } catch (error) {
-        console.log(`Backend upload failed : ${error}`);
-        
-      }
+      generateExcel(filteredRows, startDate, endDate, enabledFields);
+
+      await sendToBackend(filteredRows);
+    
     } else {
       logConsole("Error: No metrics collected.");
     }
   } catch (error) {
     logConsole(`Export process failed: ${error.message}`);
+  } finally {
     scrapeExportBtn.style.display = 'inline-block';
     stopExportBtn.style.display = 'none';
+    scrapeExportBtn.disabled = false;
   }
 }
 
@@ -1029,7 +1471,13 @@ function runActiveTabScrape() {
               Online_Hours: data.metrics.working_hours,
               Average_Hourly_Earnings: data.metrics.hourly_earnings
             };
-            generateExcel([row], startDateInput.value, endDateInput.value);
+            const enabledFields = new Set();
+            document.querySelectorAll('#optional-fields-list input[type="checkbox"]').forEach(cb => {
+              if (cb.checked) {
+                enabledFields.add(cb.id.replace('field_', ''));
+              }
+            });
+            generateExcel([row], startDateInput.value, endDateInput.value, enabledFields);
           } else {
             logConsole(`Scraped driver ${data.riderName} but verified empty metrics state.`);
           }
@@ -1060,33 +1508,36 @@ function runActiveTabScrape() {
   });
 }
 
-function generateExcel(rowsData, start, end) {
+function generateExcel(rowsData, start, end, enabledFields) {
   // Add Taxes and Fees to the headers array
-  const headers = [
-    'Trip_Date',
-    'Rider_Name',
-    'Phone Number',
-    'ID',
-    'Vehicle Plate Number',
-    'Vehicle Detail',
-    'Completed_Rides',
-    'Total_Mileage',
-    'Cash',
-    'Promotion Compensation',
-    'Bonus',
-    'Partner Fees',
-    'Taxes and Fees',
-    'Total_Collection',
-    'Online_Hours',
-    'Average Hourly Earnings',
-    'Achieved Goal',
-    'Target Goal',
-    'Subvention Bonus',
-    'Total GPS Mileage',
-    'Active Mileage',
-    'Idle Mileage',
-    'Offline Mileage'
+  const headerMap = [
+    { id: 'Trip_Date', label: 'Trip_Date' },
+    { id: 'Rider_Name', label: 'Rider_Name' },
+    { id: 'Phone_Number', label: 'Phone Number' },
+    { id: 'ID', label: 'ID' },
+    { id: 'Vehicle_Plate_Number', label: 'Vehicle Plate Number', optional: true },
+    { id: 'Vehicle_Detail', label: 'Vehicle Detail', optional: true },
+    { id: 'Completed_Rides', label: 'Completed_Rides' },
+    { id: 'Total_Mileage', label: 'Total_Mileage' },
+    { id: 'Cash', label: 'Cash' },
+    { id: 'Promotion_Compensation', label: 'Promotion Compensation', optional: true },
+    { id: 'Bonus', label: 'Bonus' },
+    { id: 'Partner_Fees', label: 'Partner Fees' },
+    { id: 'Taxes_And_Fees', label: 'Taxes and Fees' },
+    { id: 'Total_Collection', label: 'Total_Collection' },
+    { id: 'Online_Hours', label: 'Online_Hours' },
+    { id: 'Average_Hourly_Earnings', label: 'Average Hourly Earnings' },
+    { id: 'Achieved_Goal', label: 'Achieved Goal' },
+    { id: 'Target_Goal', label: 'Target Goal' },
+    { id: 'Subvention_Bonus', label: 'Subvention Bonus', optional: true },
+    { id: 'Total_GPS_Mileage', label: 'Total GPS Mileage', optional: true },
+    { id: 'Active_Mileage', label: 'Active Mileage', optional: true },
+    { id: 'Idle_Mileage', label: 'Idle Mileage', optional: true },
+    { id: 'Offline_Mileage', label: 'Offline Mileage', optional: true }
   ];
+  
+  const activeHeaders = headerMap.filter(h => !h.optional || enabledFields.has(h.id));
+  const headers = activeHeaders.map(h => h.label);
   
   const wsData = [
     [], [], [], 
@@ -1094,31 +1545,8 @@ function generateExcel(rowsData, start, end) {
   ];
   
   rowsData.forEach(row => {
-    wsData.push([
-      row.Trip_Date,
-      row.Rider_Name,
-      row.Phone_Number,
-      row.ID,
-      row.Vehicle_Plate_Number,
-      row.Vehicle_Detail,
-      row.Completed_Rides,
-      row.Total_Mileage,
-      row.Cash,
-      row.Promotion_Compensation,
-      row.Bonus, 
-      row.Partner_Fees,
-      row.Taxes_And_Fees,
-      row.Total_Collection,
-      row.Online_Hours,
-      row.Average_Hourly_Earnings,
-      row.Achieved_Goal, 
-      row.Target_Goal,   
-      row.Subvention_Bonus,
-      row.Total_GPS_Mileage ,
-      row.Active_Mileage ,
-      row.Idle_Mileage ,
-      row.Offline_Mileage 
-    ]);
+    const rowData = activeHeaders.map(h => row[h.id] !== undefined ? row[h.id] : '');
+    wsData.push(rowData);
   });
   
   const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -1147,23 +1575,21 @@ function generateExcel(rowsData, start, end) {
 }
 
 async function sendToBackend(scrapedData) {
-    try {
-        const response = await fetch("http://127.0.0.1:8000/api/upload", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ data: scrapedData })
-        });
-
-        const result = await response.json();
-        
-        if (response.ok) {
-            console.log("✅ Data successfully saved to database:", result);
-        } else {
-            console.error("❌ Failed to save data:", result);
-        }
-    } catch (error) {
-        console.error("❌ Network error connecting to backend:", error);
+  try {
+    const headers = await getAuthHeaders();
+    const response = await fetch("http://127.0.0.1:8000/api/upload", {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify({ data: scrapedData })
+    });
+    
+    if (response.ok) {
+      logConsole("Data successfully uploaded to central database.");
+    } else {
+      const result = await response.json().catch(()=>({}));
+      logConsole("Warning: Failed to upload data to backend: " + (result.detail || response.statusText));
     }
+  } catch (e) {
+    logConsole("Warning: Could not connect to backend to upload data.");
+  }
 }

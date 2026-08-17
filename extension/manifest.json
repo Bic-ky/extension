@@ -34,6 +34,10 @@
     {
       "resources": ["inject.js"],
       "matches": ["*://fleet.yango.com/*"]
+    },
+    {
+      "resources": ["admin_dashboard.html", "admin_dashboard.css", "admin_dashboard.js"],
+      "matches": ["chrome-extension://*/*"]
     }
   ]
 }
