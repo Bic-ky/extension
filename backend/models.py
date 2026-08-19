@@ -126,3 +126,14 @@ class ScrapeLog(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     rows_scraped = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class DatabaseAccessRequest(Base):
+    __tablename__ = "db_access_requests"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    access_type = Column(String, nullable=False) # 'system' or 'custom'
+    custom_db_url = Column(String, nullable=True)
+    status = Column(String, default="pending") # 'pending', 'approved', 'rejected'
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

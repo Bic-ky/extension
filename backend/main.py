@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from db_connection import engine
 import models
-from routers import auth, admin, packages, fields, data, inquiry, reviews
+from routers import auth, admin, packages, fields, data, inquiry, reviews, db_access
 import logging
 
 try:
@@ -73,6 +73,7 @@ app.include_router(fields.router)
 app.include_router(data.router)
 app.include_router(inquiry.router)
 app.include_router(reviews.router)
+app.include_router(db_access.router)
 
 @app.get("/health")
 def health_check():

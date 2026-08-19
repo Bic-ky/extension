@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict
 import re
+from datetime import datetime
 
 
 # ── Existing Data Schemas ────────────────────────────────────────────────────
@@ -113,3 +114,17 @@ class InquiryCreate(BaseModel):
 class ReviewCreate(BaseModel):
     rating: int = Field(ge=1, le=5)
     comment: str = Field(default="", max_length=2000)
+
+
+# ── DB Access Request Schemas ────────────────────────────────────────────────
+
+class DBAccessRequestCreate(BaseModel):
+    access_type: str = Field(..., pattern="^(system|custom)$")
+    custom_db_url: Optional[str] = None
+    
+class DBAccessRequestResponse(BaseModel):
+    id: int
+    access_type: str
+    custom_db_url: Optional[str]
+    status: str
+    created_at: datetime

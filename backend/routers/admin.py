@@ -102,36 +102,86 @@ def update_user_packages(user_id: int, req: schemas.AssignPackagesRequest, admin
     db.commit()
     return build_user_response(user, db)
 
-@router.get("/package-requests")
-def get_package_requests(admin_user: models.User = Depends(require_admin), db: Session = Depends(get_db)):
-    requests = db.query(models.UserPackage).filter(models.UserPackage.status == "pending").all()
+@router.delete("/users/{user_id}/packages/{package_name}")
+def remove_user_package(user_id: int, package_name: str, admin_user: models.User = Depends(require_admin), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    pkg = db.query(models.Package).filter(models.Package.name == package_name).first()
+    if pkg:
+        db.query(models.UserPackage).filter(
+            models.UserPackage.user_id == user.id,
+            models.UserPackage.package_id == pkg.id
+        ).delete()
+        db.commit()
+    return build_user_response(user, db)
+
+@router.get("/db-requests")
+def get_db_requests(admin_user: models.User = Depends(require_admin), db: Session = Depends(get_db)):
+    requests = db.query(models.DatabaseAccessRequest).all()
     result = []
     for r in requests:
         user = db.query(models.User).filter(models.User.id == r.user_id).first()
-        pkg = db.query(models.Package).filter(models.Package.id == r.package_id).first()
-        if user and pkg:
+        if user:
             result.append({
                 "id": r.id,
                 "user_id": user.id,
                 "user_name": user.full_name,
                 "user_email": user.email,
-                "package_id": pkg.id,
-                "package_name": pkg.name,
-                "package_display_name": pkg.display_name,
+                "access_type": r.access_type,
+                "custom_db_url": r.custom_db_url,
                 "status": r.status,
                 "requested_at": r.created_at
             })
     return result
 
-@router.put("/package-requests/{request_id}")
-def update_package_request(request_id: int, req: schemas.UpdatePackageRequestStatus, admin_user: models.User = Depends(require_admin), db: Session = Depends(get_db)):
-    up = db.query(models.UserPackage).filter(models.UserPackage.id == request_id).first()
-    if not up:
-        raise HTTPException(status_code=404, detail="Package request not found")
+class UpdateDBRequestStatus(schemas.BaseModel):
+    status: str
+
+@router.put("/db-requests/{request_id}")
+def update_db_request(request_id: int, req: UpdateDBRequestStatus, admin_user: models.User = Depends(require_admin), db: Session = Depends(get_db)):
+    db_req = db.query(models.DatabaseAccessRequest).filter(models.DatabaseAccessRequest.id == request_id).first()
+    if not db_req:
+        raise HTTPException(status_code=404, detail="DB access request not found")
         
-    up.status = req.status
+    db_req.status = req.status
     db.commit()
-    return {"id": up.id, "status": up.status}
+    
+    if req.status == "approved":
+        user = db.query(models.User).filter(models.User.id == db_req.user_id).first()
+        if user:
+            from email_service import send_db_approval_email
+            send_db_approval_email(user.email, user.full_name, db_req.access_type)
+            
+            if db_req.access_type == "system":
+                pkg = db.query(models.Package).filter(models.Package.name == "db_sync").first()
+                if pkg:
+                    existing_up = db.query(models.UserPackage).filter(
+                        models.UserPackage.user_id == user.id,
+                        models.UserPackage.package_id == pkg.id
+                    ).first()
+                    if existing_up:
+                        existing_up.status = "active"
+                    else:
+                        new_up = models.UserPackage(user_id=user.id, package_id=pkg.id, status="active")
+                        db.add(new_up)
+                    db.commit()
+    elif req.status == "rejected":
+        if db_req.access_type == "system":
+            user = db.query(models.User).filter(models.User.id == db_req.user_id).first()
+            if user:
+                pkg = db.query(models.Package).filter(models.Package.name == "db_sync").first()
+                if pkg:
+                    existing_up = db.query(models.UserPackage).filter(
+                        models.UserPackage.user_id == user.id,
+                        models.UserPackage.package_id == pkg.id
+                    ).first()
+                    if existing_up:
+                        db.delete(existing_up)
+                        db.commit()
+
+    return {"id": db_req.id, "status": db_req.status}
 
 @router.get("/inquiries")
 def get_inquiries(admin_user: models.User = Depends(require_admin), db: Session = Depends(get_db)):

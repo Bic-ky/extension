@@ -96,3 +96,72 @@ def send_verification_email(to_email: str, full_name: str, token: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to send verification email to {to_email}")
         return False
+
+def send_db_approval_email(to_email: str, full_name: str, access_type: str) -> bool:
+    """
+    Send an email notifying the user that their database access request has been approved.
+    Returns True on success, False on failure (logs the error).
+    """
+    subject = "Fleet Exporter — Database Access Approved"
+
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: 'Inter', Arial, sans-serif; background-color: #f8f9fa; margin: 0; padding: 40px 20px;">
+      <div style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e9ecef; overflow: hidden;">
+        <div style="background: #343a40; color: #ffffff; padding: 24px 30px; text-align: center;">
+          <h1 style="margin: 0; font-size: 20px; font-weight: 600;">Fleet Exporter</h1>
+          <p style="margin: 6px 0 0 0; font-size: 13px; opacity: 0.8;">Database Access Approved</p>
+        </div>
+        <div style="padding: 30px;">
+          <p style="font-size: 14px; color: #212529; line-height: 1.6; margin: 0 0 20px 0;">
+            Hi <strong>{full_name}</strong>,
+          </p>
+          <p style="font-size: 14px; color: #212529; line-height: 1.6; margin: 0 0 24px 0;">
+            Good news! Your database access request for the <strong>{access_type}</strong> database has been approved.
+          </p>
+          <p style="font-size: 14px; color: #212529; line-height: 1.6; margin: 0 0 24px 0;">
+            You can now start using the DB sync features corresponding to your request.
+          </p>
+        </div>
+        <div style="background: #f8f9fa; border-top: 1px solid #e9ecef; padding: 16px 30px; text-align: center;">
+          <p style="font-size: 11px; color: #6c757d; margin: 0;">
+            This is an automated message from Fleet Exporter. Do not reply.
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+
+    if not SMTP_USER or not SMTP_PASS:
+        logger.warning(f"SMTP not configured. DB approval email for {to_email} was not sent.")
+        return True
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"Fleet Exporter <{SMTP_USER}>"
+        msg["To"] = to_email
+
+        # Plain-text fallback
+        plain_text = (
+            f"Hi {full_name},\n\n"
+            f"Good news! Your database access request for the {access_type} database has been approved.\n"
+            f"You can now start using the DB sync features corresponding to your request.\n\n"
+            f"— Fleet Exporter"
+        )
+        msg.attach(MIMEText(plain_text, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, to_email, msg.as_string())
+
+        logger.info(f"DB approval email sent to {to_email}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to send DB approval email to {to_email}: {str(e)}")
+        return False
